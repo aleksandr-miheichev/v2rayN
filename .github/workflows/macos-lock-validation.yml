@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  SOURCE_REVISION: d15087ea95d96782b688a3392836f7ad6c1a7d24
+  SOURCE_REVISION: 6557afea668bb5109eaa7b6de0b0cb4ca36583d8
   TUNIT_MAX_PARALLEL_TESTS: 1
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -20,7 +20,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, windows-11-arm, ubuntu-24.04, macos-latest, macos-15-intel]
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: windows-11-arm
+            rid: win-arm64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -41,9 +51,77 @@ jobs:
       - name: WebAPI tests
         if: ${{ !cancelled() }}
         run: dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory ./TestResults/WebAPI -- --report-trx
+      - name: Publish self-contained WebAPI
+        shell: pwsh
+        env:
+          RID: ${{ matrix.rid }}
+        run: |
+          dotnet publish ./v2rayN/v2rayN.WebAPI/v2rayN.WebAPI.csproj -c Release -r $env:RID -p:SelfContained=true -o "$env:RUNNER_TEMP/publish/$env:RID"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:RID -eq 'linux-x64') {
+            dotnet publish ./v2rayN/v2rayN.WebAPI/v2rayN.WebAPI.csproj -c Release -r linux-arm64 -p:SelfContained=true -o "$env:RUNNER_TEMP/publish/linux-arm64"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-${{ matrix.os }}
+          path: TestResults
+          retention-days: 14
+
+  negative-controls:
+    name: Reject false fixes (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_REVISION }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+      - name: Reject shared owners and incorrect Darwin flags
+        shell: pwsh
+        run: |
+          $sourcePath = Join-Path $PWD 'v2rayN/v2rayN.WebAPI/Launcher/WebInstanceLock.cs'
+          $original = [IO.File]::ReadAllText($sourcePath)
+          foreach ($control in @('shared-owner', 'linux-flags')) {
+            if ($control -eq 'shared-owner') {
+              $anchor = 'Share = OperatingSystem.IsWindows() ? FileShare.ReadWrite : FileShare.None,'
+              $replacement = 'Share = OperatingSystem.IsWindows() ? FileShare.ReadWrite : FileShare.ReadWrite,'
+            } else {
+              $anchor = 'OpenCloseOnExecMacOS = 0x01000000;'
+              $replacement = 'OpenCloseOnExecMacOS = 0x00080000;'
+            }
+            if (-not $original.Contains($anchor)) { throw "Missing negative-control anchor: $control" }
+            try {
+              [IO.File]::WriteAllText($sourcePath, $original.Replace($anchor, $replacement))
+              dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory "./TestResults/$control" -- --report-trx
+              $testExit = $LASTEXITCODE
+              if ($testExit -ne 2) { throw "Expected real test failures for $control, got exit $testExit" }
+              $trxPath = @(Get-ChildItem "./TestResults/$control" -Filter '*.trx')[0].FullName
+              [xml]$trx = Get-Content $trxPath -Raw
+              $failures = @($trx.TestRun.Results.UnitTestResult | Where-Object outcome -eq 'Failed')
+              if (-not ($failures | Where-Object testName -eq 'OwnerReadsAcrossProcessesAndInsideTheOwnerPreserveExclusiveOwnership')) {
+                throw "The process-contention regression did not reject $control"
+              }
+              if ([int]$trx.TestRun.ResultSummary.Counters.total -ne 395) { throw 'Unexpected test count' }
+              Write-Output "EXPECTED_REJECTION: $control; $($failures.Count) failed of 395"
+            } finally {
+              [IO.File]::WriteAllText($sourcePath, $original)
+            }
+          }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Source restoration failed' }
+          exit 0
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: negative-control-results-${{ matrix.os }}
           path: TestResults
           retention-days: 14
