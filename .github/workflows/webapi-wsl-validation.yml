@@ -34,11 +34,39 @@ jobs:
           git rev-parse HEAD
           uname -m
           dotnet --info
+      - name: Adapt only the verification harness RID
+        run: |
+          python3 - <<'PY'
+          import difflib
+          from pathlib import Path
+
+          web = Path('v2rayN/v2rayN.WebAPI')
+          verify = web / 'Scripts/verify.sh'
+          zip_test = web / 'Tests/Integration/test-full-zip-runtime.sh'
+          original_verify = verify.read_text()
+          original_zip = zip_test.read_text()
+          publish_anchor = 'bash "$web_root/Scripts/publish-native.sh" linux-x64 "$output_dir"'
+          zip_anchor = 'Tests/Integration/test-full-zip-runtime.sh'
+          identity_anchor = 'assert identity["rid"] == "linux-x64", identity'
+          assert original_verify.count(publish_anchor) == 1
+          assert original_verify.count(zip_anchor) == 1
+          assert original_zip.count(identity_anchor) == 1
+          adapted_verify = original_verify.replace(publish_anchor, publish_anchor.replace('linux-x64', 'linux-arm64')).replace(zip_anchor, 'Tests/Integration/test-full-zip-runtime-arm64-ci.sh')
+          adapted_zip = original_zip.replace(identity_anchor, identity_anchor.replace('linux-x64', 'linux-arm64'))
+          verify.with_name('verify-arm64-ci.sh').write_text(adapted_verify)
+          zip_test.with_name('test-full-zip-runtime-arm64-ci.sh').write_text(adapted_zip)
+          for name, original, adapted in [('verify.sh', original_verify, adapted_verify), ('test-full-zip-runtime.sh', original_zip, adapted_zip)]:
+              print(''.join(difflib.unified_diff(original.splitlines(True), adapted.splitlines(True), fromfile=name, tofile=f'{name} (task-only ARM64 harness)')))
+          PY
+          git diff --exit-code
       - name: Full WebAPI verification
-        run: bash v2rayN/v2rayN.WebAPI/Scripts/verify.sh "$RUNNER_TEMP/publish/linux-arm64"
+        run: bash v2rayN/v2rayN.WebAPI/Scripts/verify-arm64-ci.sh "$RUNNER_TEMP/publish/linux-arm64"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: full-verification-linux-arm64
-          path: TestResults
+          path: |
+            TestResults
+            v2rayN/v2rayN.WebAPI/Scripts/verify-arm64-ci.sh
+            v2rayN/v2rayN.WebAPI/Tests/Integration/test-full-zip-runtime-arm64-ci.sh
           retention-days: 14
