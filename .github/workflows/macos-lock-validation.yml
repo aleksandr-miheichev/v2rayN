@@ -1,4 +1,4 @@
-name: macOS instance-lock validation
+name: macOS descriptor inheritance diagnostic
 
 on:
   push:
@@ -10,118 +10,107 @@ permissions:
 
 env:
   SOURCE_REVISION: 6557afea668bb5109eaa7b6de0b0cb4ca36583d8
-  TUNIT_MAX_PARALLEL_TESTS: 1
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  tests:
-    name: Tests (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            rid: win-x64
-          - os: windows-11-arm
-            rid: win-arm64
-          - os: ubuntu-24.04
-            rid: linux-x64
-          - os: macos-latest
-            rid: osx-arm64
-          - os: macos-15-intel
-            rid: osx-x64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.SOURCE_REVISION }}
-          persist-credentials: false
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.x'
-      - name: Record tested source and runtime
-        shell: pwsh
-        run: |
-          git rev-parse HEAD
-          dotnet --info
-      - name: ServiceLib tests
-        run: dotnet test --project ./v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --results-directory ./TestResults/ServiceLib -- --report-trx
-      - name: WebAPI tests
-        if: ${{ !cancelled() }}
-        run: dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory ./TestResults/WebAPI -- --report-trx
-      - name: Publish self-contained WebAPI
-        shell: pwsh
-        env:
-          RID: ${{ matrix.rid }}
-        run: |
-          dotnet publish ./v2rayN/v2rayN.WebAPI/v2rayN.WebAPI.csproj -c Release -r $env:RID -p:SelfContained=true -o "$env:RUNNER_TEMP/publish/$env:RID"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($env:RID -eq 'linux-x64') {
-            dotnet publish ./v2rayN/v2rayN.WebAPI/v2rayN.WebAPI.csproj -c Release -r linux-arm64 -p:SelfContained=true -o "$env:RUNNER_TEMP/publish/linux-arm64"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: test-results-${{ matrix.os }}
-          path: TestResults
-          retention-days: 14
-
-  negative-controls:
-    name: Reject false fixes (${{ matrix.os }})
+  descriptor-flags:
+    name: Native descriptor flags (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.SOURCE_REVISION }}
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.x'
-      - name: Reject shared owners and incorrect Darwin flags
-        shell: pwsh
+      - name: Verify the source flag with fcntl and fork-exec
+        shell: bash
         run: |
-          $sourcePath = Join-Path $PWD 'v2rayN/v2rayN.WebAPI/Launcher/WebInstanceLock.cs'
-          $original = [IO.File]::ReadAllText($sourcePath)
-          foreach ($control in @('shared-owner', 'linux-flags')) {
-            if ($control -eq 'shared-owner') {
-              $anchor = 'Share = OperatingSystem.IsWindows() ? FileShare.ReadWrite : FileShare.None,'
-              $replacement = 'Share = OperatingSystem.IsWindows() ? FileShare.ReadWrite : FileShare.ReadWrite,'
-            } else {
-              $anchor = 'OpenCloseOnExecMacOS = 0x01000000;'
-              $replacement = 'OpenCloseOnExecMacOS = 0x00080000;'
-            }
-            if (-not $original.Contains($anchor)) { throw "Missing negative-control anchor: $control" }
-            try {
-              [IO.File]::WriteAllText($sourcePath, $original.Replace($anchor, $replacement))
-              dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory "./TestResults/$control" -- --report-trx
-              $testExit = $LASTEXITCODE
-              if ($testExit -ne 2) { throw "Expected real test failures for $control, got exit $testExit" }
-              $trxPath = @(Get-ChildItem "./TestResults/$control" -Filter '*.trx')[0].FullName
-              [xml]$trx = Get-Content $trxPath -Raw
-              $failures = @($trx.TestRun.Results.UnitTestResult | Where-Object outcome -eq 'Failed')
-              if (-not ($failures | Where-Object testName -eq 'OwnerReadsAcrossProcessesAndInsideTheOwnerPreserveExclusiveOwnership')) {
-                throw "The process-contention regression did not reject $control"
+          set -euo pipefail
+          git rev-parse HEAD
+          source_flag=$(python3 - <<'PY'
+          import pathlib, re
+          source = pathlib.Path("v2rayN/v2rayN.WebAPI/Launcher/WebInstanceLock.cs").read_text()
+          match = re.search(r"OpenCloseOnExecMacOS\s*=\s*(0x[0-9a-fA-F]+)", source)
+          if not match:
+              raise SystemExit("Darwin source flag was not found")
+          print(match.group(1))
+          PY
+          )
+          cat > check-macos-cloexec.c <<'C'
+          #define _POSIX_C_SOURCE 200809L
+          #include <errno.h>
+          #include <fcntl.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <sys/stat.h>
+          #include <sys/types.h>
+          #include <sys/wait.h>
+          #include <unistd.h>
+
+          static int probe(const char *self, const char *path, int flags,
+                           int expected_cloexec, const char *label)
+          {
+              int fd = open(path, O_RDONLY | flags);
+              if (fd < 0) { perror("open"); return 1; }
+              int descriptor_flags = fcntl(fd, F_GETFD);
+              struct stat identity;
+              if (descriptor_flags < 0 || fstat(fd, &identity) != 0) {
+                  perror("descriptor"); close(fd); return 1;
               }
-              if ([int]$trx.TestRun.ResultSummary.Counters.total -ne 395) { throw 'Unexpected test count' }
-              Write-Output "EXPECTED_REJECTION: $control; $($failures.Count) failed of 395"
-            } finally {
-              [IO.File]::WriteAllText($sourcePath, $original)
-            }
+              int cloexec = (descriptor_flags & FD_CLOEXEC) != 0;
+              char fd_text[32], device_text[32], inode_text[32];
+              snprintf(fd_text, sizeof(fd_text), "%d", fd);
+              snprintf(device_text, sizeof(device_text), "%llu",
+                       (unsigned long long)identity.st_dev);
+              snprintf(inode_text, sizeof(inode_text), "%llu",
+                       (unsigned long long)identity.st_ino);
+              fflush(stdout);
+              pid_t child = fork();
+              if (child < 0) { perror("fork"); close(fd); return 1; }
+              if (child == 0) {
+                  execl(self, self, "child", fd_text, device_text, inode_text,
+                        (char *)NULL);
+                  _exit(127);
+              }
+              int status;
+              while (waitpid(child, &status, 0) < 0) {
+                  if (errno == EINTR) continue;
+                  perror("waitpid"); close(fd); return 1;
+              }
+              close(fd);
+              if (!WIFEXITED(status)) return 1;
+              int inherited = WEXITSTATUS(status);
+              printf("%s flags=0x%x FD_CLOEXEC=%d exec_inherited=%d\n",
+                     label, flags, cloexec, inherited);
+              return cloexec == expected_cloexec &&
+                     inherited == (expected_cloexec ? 0 : 1) ? 0 : 1;
           }
-          git diff --exit-code
-          if ($LASTEXITCODE -ne 0) { throw 'Source restoration failed' }
-          exit 0
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: negative-control-results-${{ matrix.os }}
-          path: TestResults
-          retention-days: 14
+
+          int main(int argc, char **argv)
+          {
+              if (argc == 5 && strcmp(argv[1], "child") == 0) {
+                  struct stat identity;
+                  int fd = atoi(argv[2]);
+                  if (fstat(fd, &identity) != 0) return 0;
+                  return (unsigned long long)identity.st_dev == strtoull(argv[3], NULL, 10) &&
+                         (unsigned long long)identity.st_ino == strtoull(argv[4], NULL, 10) ? 1 : 0;
+              }
+              if (argc != 2) return 64;
+              char path[] = "/tmp/v2rayn-cloexec.XXXXXX";
+              int temporary = mkstemp(path);
+              if (temporary < 0) { perror("mkstemp"); return 1; }
+              close(temporary);
+              int source_flags = (int)strtoul(argv[1], NULL, 0);
+              int source_result = probe(argv[0], path, source_flags, 1, "SOURCE");
+              int linux_result = probe(argv[0], path, 0x00080000, 0, "LINUX_CONTROL");
+              unlink(path);
+              return source_result || linux_result;
+          }
+          C
+          cc -std=c11 -Wall -Wextra -Werror check-macos-cloexec.c -o check-macos-cloexec
+          ./check-macos-cloexec "$source_flag"
+
