@@ -1,4 +1,4 @@
-name: WebAPI WSL fixes validation
+name: WebAPI Linux ARM64 validation
 
 on:
   push:
@@ -10,29 +10,16 @@ permissions:
 
 env:
   SOURCE_REVISION: a01a91aeca3f8657795476733a733245580d4a1b
-  MAC_INTEGRATION_REVISION: dad02ee1f0858fc4d99fd9679a93fa68304aab78
   TUNIT_MAX_PARALLEL_TESTS: 1
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  V2RAYN_WEB_COMMIT: a01a91aeca3f8657795476733a733245580d4a1b
+  V2RAYN_WEB_REPOSITORY: 2dust/v2rayN
 
 jobs:
-  tests:
-    name: Full suites (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            rid: win-x64
-          - os: windows-11-arm
-            rid: win-arm64
-          - os: ubuntu-24.04
-            rid: linux-x64
-          - os: macos-latest
-            rid: osx-arm64
-          - os: macos-15-intel
-            rid: osx-x64
-    runs-on: ${{ matrix.os }}
+  verify:
+    name: Full verification (Linux ARM64)
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -43,64 +30,15 @@ jobs:
         with:
           dotnet-version: '10.x'
       - name: Record source and runtime
-        shell: pwsh
         run: |
           git rev-parse HEAD
+          uname -m
           dotnet --info
-      - name: ServiceLib tests
-        run: dotnet test --project ./v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --results-directory ./TestResults/ServiceLib -- --maximum-parallel-tests 1 --report-trx
-      - name: WebAPI tests
-        if: ${{ !cancelled() }}
-        run: dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory ./TestResults/WebAPI -- --maximum-parallel-tests 1 --report-trx
-      - name: Publish self-contained WebAPI
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        env:
-          RID: ${{ matrix.rid }}
-        run: |
-          dotnet publish ./v2rayN/v2rayN.WebAPI/v2rayN.WebAPI.csproj -c Release -r $env:RID -p:SelfContained=true -o "$env:RUNNER_TEMP/publish/$env:RID"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($env:RID -eq 'linux-x64') {
-            dotnet publish ./v2rayN/v2rayN.WebAPI/v2rayN.WebAPI.csproj -c Release -r linux-arm64 -p:SelfContained=true -o "$env:RUNNER_TEMP/publish/linux-arm64"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+      - name: Full WebAPI verification
+        run: bash v2rayN/v2rayN.WebAPI/Scripts/verify.sh "$RUNNER_TEMP/publish/linux-arm64"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: full-results-${{ matrix.os }}
-          path: TestResults
-          retention-days: 14
-
-  mac-integration:
-    name: With separate macOS lock fix (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, macos-15-intel]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.MAC_INTEGRATION_REVISION }}
-          persist-credentials: false
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.x'
-      - name: Record isolated integration source
-        shell: pwsh
-        run: |
-          git rev-parse HEAD
-          dotnet --info
-          Write-Output 'This source adds only WebInstanceLock.cs from separate PR 2dust/v2rayN#10454 to the candidate.'
-      - name: ServiceLib tests
-        run: dotnet test --project ./v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --results-directory ./TestResults/ServiceLib -- --maximum-parallel-tests 1 --report-trx
-      - name: WebAPI tests
-        if: ${{ !cancelled() }}
-        run: dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory ./TestResults/WebAPI -- --maximum-parallel-tests 1 --report-trx
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: mac-integration-results-${{ matrix.os }}
+          name: full-verification-linux-arm64
           path: TestResults
           retention-days: 14
