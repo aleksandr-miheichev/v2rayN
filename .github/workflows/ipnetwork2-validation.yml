@@ -1,0 +1,116 @@
+name: IPNetwork2 validation
+
+on:
+  push:
+    branches:
+      - codex/validate-ipnetwork2-5.0.1
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_REVISION: d8ebfa36fde10de0161f1fbc432d7a5ad1c1d478
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }}, IPNetwork2 ${{ matrix.package }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-latest]
+        package: ['4.3.0', '5.0.1']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_REVISION }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+      - name: Record source and SDK
+        shell: pwsh
+        run: |
+          git rev-parse HEAD
+          dotnet --info
+      - name: Select baseline package
+        if: matrix.package == '4.3.0'
+        shell: pwsh
+        run: |
+          $path = Join-Path $PWD 'v2rayN/Directory.Packages.props'
+          $source = [IO.File]::ReadAllText($path)
+          $candidate = '<PackageVersion Include="IPNetwork2" Version="5.0.1" />'
+          if (-not $source.Contains($candidate)) { throw 'Candidate package declaration not found' }
+          [IO.File]::WriteAllText($path, $source.Replace($candidate, '<PackageVersion Include="IPNetwork2" Version="4.3.0" />'))
+          Write-Output 'A/B baseline: only IPNetwork2 was restored to 4.3.0'
+      - name: ServiceLib tests
+        run: dotnet test --project ./v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --results-directory ./TestResults/ServiceLib -- --report-trx
+      - name: WebAPI tests
+        if: ${{ !cancelled() }}
+        run: dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory ./TestResults/WebAPI -- --maximum-parallel-tests 1 --report-trx
+      - name: Verify resolved package
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        env:
+          EXPECTED_PACKAGE: ${{ matrix.package }}
+        run: |
+          $assets = Get-Content ./v2rayN/ServiceLib/obj/project.assets.json -Raw | ConvertFrom-Json
+          $packages = $assets.libraries.PSObject.Properties.Name
+          $expected = "IPNetwork2/$env:EXPECTED_PACKAGE"
+          $resolved = @($packages | Where-Object { $_.StartsWith('IPNetwork2/') })
+          if ($resolved.Count -ne 1 -or $resolved[0] -ne $expected) {
+            throw 'Unexpected IPNetwork2 resolution'
+          }
+          Write-Output "Resolved $expected"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.package }}
+          path: TestResults
+          retention-days: 14
+
+  publish:
+    name: Publish (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rids: win-x64,win-arm64
+          - os: ubuntu-24.04
+            rids: linux-x64,linux-arm64
+          - os: macos-latest
+            rids: osx-x64,osx-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_REVISION }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+      - name: Publish Avalonia and WebAPI
+        shell: pwsh
+        env:
+          RIDS: ${{ matrix.rids }}
+        run: |
+          foreach ($rid in $env:RIDS.Split(',')) {
+            foreach ($project in @('v2rayN.Desktop', 'v2rayN.WebAPI')) {
+              dotnet publish "./v2rayN/$project/$project.csproj" -c Release -r $rid -p:SelfContained=true -o "$env:RUNNER_TEMP/publish/$project-$rid"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+      - name: Publish WPF
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($rid in @('win-x86', 'win-x64', 'win-arm64')) {
+            dotnet publish ./v2rayN/v2rayN/v2rayN.csproj -c Release -r $rid -p:SelfContained=true -p:EnableWindowsTargeting=true -o "$env:RUNNER_TEMP/publish/WPF-$rid"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
