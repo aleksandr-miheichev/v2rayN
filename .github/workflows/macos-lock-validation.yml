@@ -1,0 +1,49 @@
+name: macOS instance-lock validation
+
+on:
+  push:
+    branches:
+      - codex/validate-macos-instance-lock
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_REVISION: d15087ea95d96782b688a3392836f7ad6c1a7d24
+  TUNIT_MAX_PARALLEL_TESTS: 1
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm, ubuntu-24.04, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_REVISION }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+      - name: Record tested source and runtime
+        shell: pwsh
+        run: |
+          git rev-parse HEAD
+          dotnet --info
+      - name: ServiceLib tests
+        run: dotnet test --project ./v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --results-directory ./TestResults/ServiceLib -- --report-trx
+      - name: WebAPI tests
+        if: ${{ !cancelled() }}
+        run: dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory ./TestResults/WebAPI -- --report-trx
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}
+          path: TestResults
+          retention-days: 14
