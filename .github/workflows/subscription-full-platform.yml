@@ -1,0 +1,65 @@
+name: Subscription full-platform integration validation
+
+on:
+  push:
+    branches:
+      - codex/validate-subscription-platforms-01a196ad
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      FEATURE_SHA: f616f213a6e480413bdb89689492a5c649872383
+      V2RAYN_LOCAL_APPLICATION_DATA_V2: '0'
+      TUNIT_MAX_PARALLEL_TESTS: '1'
+      DOTNET_CLI_UI_LANGUAGE: en
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.403
+      - name: Verify the isolated integration scope
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD^) -ne $env:FEATURE_SHA) { throw 'Unexpected parent revision' }
+          $expected = @(
+            '.github/workflows/subscription-full-platform.yml',
+            'v2rayN/v2rayN.WebAPI/Launcher/WebInstanceLock.cs',
+            'v2rayN/v2rayN.WebAPI/Tests/CoreProcessTrackerTests.cs',
+            'v2rayN/v2rayN.WebAPI/Tests/WebAuthRateLimitTests.cs'
+          )
+          $actual = @(git diff --name-only $env:FEATURE_SHA HEAD)
+          if (Compare-Object ($expected | Sort-Object) ($actual | Sort-Object)) { throw 'Unexpected integration changes' }
+          dotnet --info
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Complete ServiceLib suite
+        run: dotnet test --project v2rayN/ServiceLib.Tests -c Release --minimum-expected-tests 206 --results-directory TestResults/service -- --report-trx
+      - name: Complete WebAPI suite
+        if: ${{ !cancelled() }}
+        run: dotnet test --project v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --minimum-expected-tests 388 --results-directory TestResults/webapi -- --report-trx
+      - name: Build desktop UI
+        if: ${{ !cancelled() }}
+        run: dotnet build v2rayN/v2rayN.Desktop/v2rayN.Desktop.csproj -c Release
+      - name: Build WPF UI
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: dotnet build v2rayN/v2rayN/v2rayN.csproj -c Release
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: subscription-integration-${{ matrix.os }}
+          path: TestResults
