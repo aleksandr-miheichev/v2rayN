@@ -1,0 +1,140 @@
+name: PR 10499 merge validation
+
+on:
+  push:
+    branches: [codex/verify-pr10499-merge-9e00535]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.403'
+
+      - name: Run complete ServiceLib suite
+        id: service
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          & dotnet test --project v2rayN/ServiceLib.Tests -c Release --results-directory artifacts/tests/service -- --report-trx 2>&1 | Tee-Object -FilePath artifacts/logs/service.log
+          exit $LASTEXITCODE
+
+      - name: Run complete WebAPI suite
+        id: webapi
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          & dotnet test --project v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --results-directory artifacts/tests/webapi -- --report-trx 2>&1 | Tee-Object -FilePath artifacts/logs/webapi.log
+          exit $LASTEXITCODE
+
+      - name: Build native-platform Avalonia
+        id: avalonia
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          & dotnet build v2rayN/v2rayN.Desktop/v2rayN.Desktop.csproj -c Release -r ${{ matrix.rid }} -p:SelfContained=true -p:IsAot=false 2>&1 | Tee-Object -FilePath artifacts/logs/avalonia.log
+          exit $LASTEXITCODE
+
+      - name: Build Windows WPF
+        id: wpf
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          & dotnet build v2rayN/v2rayN/v2rayN.csproj -c Release -r win-x64 -p:SelfContained=true 2>&1 | Tee-Object -FilePath artifacts/logs/wpf.log
+          exit $LASTEXITCODE
+
+      - name: Publish Windows x86 WPF
+        id: x86_wpf
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          & dotnet publish v2rayN/v2rayN/v2rayN.csproj -c Release -r win-x86 -p:SelfContained=true -o artifacts/x86-wpf 2>&1 | Tee-Object -FilePath artifacts/logs/x86_wpf.log
+          exit $LASTEXITCODE
+
+      - name: Publish Windows x86 Avalonia
+        id: x86_avalonia
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          & dotnet publish v2rayN/v2rayN.Desktop/v2rayN.Desktop.csproj -c Release -r win-x86 -p:SelfContained=true -p:IsAot=false -o artifacts/x86-avalonia 2>&1 | Tee-Object -FilePath artifacts/logs/x86_avalonia.log
+          exit $LASTEXITCODE
+
+      - name: Publish Windows x86 AmazTool
+        id: x86_amaztool
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_UI_LANGUAGE = 'en'
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          & dotnet publish v2rayN/AmazTool/AmazTool.csproj -c Release -r win-x86 -p:SelfContained=true -p:PublishTrimmed=true -p:IsAot=false -o artifacts/x86-amaztool 2>&1 | Tee-Object -FilePath artifacts/logs/x86_amaztool.log
+          exit $LASTEXITCODE
+
+      - name: Record exact source and check outcomes
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+          $checks = [ordered]@{
+            service = '${{ steps.service.outcome }}'
+            webapi = '${{ steps.webapi.outcome }}'
+            avalonia = '${{ steps.avalonia.outcome }}'
+            wpf = '${{ steps.wpf.outcome }}'
+            x86_wpf = '${{ steps.x86_wpf.outcome }}'
+            x86_avalonia = '${{ steps.x86_avalonia.outcome }}'
+            x86_amaztool = '${{ steps.x86_amaztool.outcome }}'
+          }
+          $required = @('service', 'webapi', 'avalonia')
+          if ('${{ runner.os }}' -eq 'Windows') {
+            $required += @('wpf', 'x86_wpf', 'x86_avalonia', 'x86_amaztool')
+          }
+          $failed = @($required | Where-Object { $checks[$_] -ne 'success' })
+          [ordered]@{ source = '9e005358ea5f305baef1e370df9298934c6376b1'; validationHead = '${{ github.sha }}'; rid = '${{ matrix.rid }}'; checks = $checks; failed = $failed } |
+            ConvertTo-Json -Depth 5 | Tee-Object -FilePath artifacts/logs/outcomes.json
+          if ($failed.Count -gt 0) { exit 1 }
+
+      - name: Upload test results and full logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: warning-validation-${{ matrix.rid }}
+          path: |
+            artifacts/logs/
+            artifacts/tests/
+          if-no-files-found: error
