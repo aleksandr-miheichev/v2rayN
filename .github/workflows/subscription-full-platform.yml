@@ -2,9 +2,15 @@ name: Subscription split integration
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/validate-subscription-split-20261103
+    inputs:
+      platform:
+        description: Runner set
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - macos-26-intel
 
 permissions:
   contents: read
@@ -16,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(inputs.platform == 'macos-26-intel' && '["macos-26-intel"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
         target: [data, combined]
         include:
           - target: data
@@ -43,6 +49,7 @@ jobs:
         shell: bash
         env:
           TARGET_NAME: ${{ matrix.target }}
+          REQUESTED_PLATFORM: ${{ inputs.platform }}
           EXPECTED_CODE_SHA: ${{ matrix.code_ref }}
           EXPECTED_CODE_TREE: ${{ matrix.expected_tree }}
           WORKFLOW_HEAD_SHA: ${{ github.sha }}
@@ -51,6 +58,7 @@ jobs:
           WORKFLOW_TRIGGER_REF: ${{ github.ref }}
           REQUESTED_RUNNER: ${{ matrix.os }}
           ACTUAL_RUNNER_OS: ${{ runner.os }}
+          ACTUAL_RUNNER_ARCH: ${{ runner.arch }}
         run: |
           set -euo pipefail
           actual_code_sha="$(git rev-parse HEAD)"
@@ -59,8 +67,10 @@ jobs:
           mkdir -p TestResults
           {
             printf 'target=%s\n' "$TARGET_NAME"
+            printf 'requested_platform=%s\n' "$REQUESTED_PLATFORM"
             printf 'requested_runner=%s\n' "$REQUESTED_RUNNER"
             printf 'actual_runner_os=%s\n' "$ACTUAL_RUNNER_OS"
+            printf 'actual_runner_arch=%s\n' "$ACTUAL_RUNNER_ARCH"
             printf 'workflow_head_sha=%s\n' "$WORKFLOW_HEAD_SHA"
             printf 'workflow_definition_sha=%s\n' "$WORKFLOW_DEFINITION_SHA"
             printf 'workflow_definition_ref=%s\n' "$WORKFLOW_DEFINITION_REF"
@@ -72,6 +82,20 @@ jobs:
             printf 'initial_worktree_status=%s\n' "$initial_status"
           } | tee TestResults/provenance.txt
           test "$WORKFLOW_TRIGGER_REF" = 'refs/heads/codex/validate-subscription-split-20261103'
+          case "$REQUESTED_PLATFORM" in
+            all)
+              case "$REQUESTED_RUNNER" in
+                ubuntu-latest|windows-latest|macos-latest) ;;
+                *) exit 1 ;;
+              esac
+              ;;
+            macos-26-intel)
+              test "$REQUESTED_RUNNER" = 'macos-26-intel'
+              test "$ACTUAL_RUNNER_OS" = 'macOS'
+              test "$ACTUAL_RUNNER_ARCH" = 'X64'
+              ;;
+            *) exit 1 ;;
+          esac
           test "$actual_code_sha" = "$EXPECTED_CODE_SHA"
           test "$actual_code_tree" = "$EXPECTED_CODE_TREE"
           test -z "$initial_status"
