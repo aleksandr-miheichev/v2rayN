@@ -11,45 +11,108 @@ permissions:
 
 jobs:
   integration:
+    name: ${{ matrix.target }} / ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        target: [data, combined]
+        include:
+          - target: data
+            code_ref: '9d7742588114dd56519d833b7d8cfb9ebf76de76'
+            expected_tree: '43e214c0ed1e71f0f7a8885d312ec053ff8658f8'
+            minimum_tests: 242
+          - target: combined
+            code_ref: '733e6c1ac3fec85e7949d6ea5dfcd6a1df65005e'
+            expected_tree: '614023c4c92a746dfcae2288e607f440c73a0cfd'
+            minimum_tests: 278
     runs-on: ${{ matrix.os }}
     env:
       V2RAYN_LOCAL_APPLICATION_DATA_V2: '0'
       TUNIT_MAX_PARALLEL_TESTS: '1'
     steps:
-      - name: Checkout
+      - name: Checkout pinned code
         uses: actions/checkout@v7
         with:
+          ref: ${{ matrix.code_ref }}
           submodules: recursive
+
+      - name: Verify and record source provenance
+        id: provenance
+        shell: bash
+        env:
+          TARGET_NAME: ${{ matrix.target }}
+          EXPECTED_CODE_SHA: ${{ matrix.code_ref }}
+          EXPECTED_CODE_TREE: ${{ matrix.expected_tree }}
+          WORKFLOW_HEAD_SHA: ${{ github.sha }}
+          WORKFLOW_DEFINITION_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_DEFINITION_REF: ${{ github.workflow_ref }}
+          WORKFLOW_TRIGGER_REF: ${{ github.ref }}
+          REQUESTED_RUNNER: ${{ matrix.os }}
+          ACTUAL_RUNNER_OS: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+          actual_code_sha="$(git rev-parse HEAD)"
+          actual_code_tree="$(git rev-parse 'HEAD^{tree}')"
+          initial_status="$(git status --porcelain)"
+          mkdir -p TestResults
+          {
+            printf 'target=%s\n' "$TARGET_NAME"
+            printf 'requested_runner=%s\n' "$REQUESTED_RUNNER"
+            printf 'actual_runner_os=%s\n' "$ACTUAL_RUNNER_OS"
+            printf 'workflow_head_sha=%s\n' "$WORKFLOW_HEAD_SHA"
+            printf 'workflow_definition_sha=%s\n' "$WORKFLOW_DEFINITION_SHA"
+            printf 'workflow_definition_ref=%s\n' "$WORKFLOW_DEFINITION_REF"
+            printf 'workflow_trigger_ref=%s\n' "$WORKFLOW_TRIGGER_REF"
+            printf 'expected_code_sha=%s\n' "$EXPECTED_CODE_SHA"
+            printf 'actual_code_sha=%s\n' "$actual_code_sha"
+            printf 'expected_code_tree=%s\n' "$EXPECTED_CODE_TREE"
+            printf 'actual_code_tree=%s\n' "$actual_code_tree"
+            printf 'initial_worktree_status=%s\n' "$initial_status"
+          } | tee TestResults/provenance.txt
+          test "$WORKFLOW_TRIGGER_REF" = 'refs/heads/codex/validate-subscription-split-20261103'
+          test "$actual_code_sha" = "$EXPECTED_CODE_SHA"
+          test "$actual_code_tree" = "$EXPECTED_CODE_TREE"
+          test -z "$initial_status"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.403'
 
+      - name: Verify and record .NET SDK
+        id: sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sdk="$(dotnet --version)"
+          printf 'actual_dotnet_sdk=%s\n' "$actual_sdk" | tee -a TestResults/provenance.txt
+          dotnet --info >> TestResults/provenance.txt
+          test "$actual_sdk" = '10.0.403'
+
       - name: Test ServiceLib
-        run: dotnet test --project ./v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --artifacts-path ./artifacts/servicelib --results-directory ./TestResults/servicelib --no-ansi --no-progress --minimum-expected-tests 278 --report-trx
+        if: ${{ !cancelled() && steps.provenance.outcome == 'success' && steps.sdk.outcome == 'success' }}
+        run: dotnet test --project ./v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --artifacts-path ./artifacts/servicelib --results-directory ./TestResults/servicelib --no-ansi --no-progress --minimum-expected-tests ${{ matrix.minimum_tests }} --report-trx
 
       - name: Test WebAPI
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.provenance.outcome == 'success' && steps.sdk.outcome == 'success' }}
         run: dotnet test --project ./v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --artifacts-path ./artifacts/webapi --results-directory ./TestResults/webapi --no-ansi --no-progress --minimum-expected-tests 402 --report-trx
 
       - name: Build Avalonia UI
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.provenance.outcome == 'success' && steps.sdk.outcome == 'success' }}
         run: dotnet build ./v2rayN/v2rayN.Desktop/v2rayN.Desktop.csproj -c Release --artifacts-path ./artifacts/desktop
 
       - name: Build WPF UI
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        if: ${{ !cancelled() && steps.provenance.outcome == 'success' && steps.sdk.outcome == 'success' && runner.os == 'Windows' }}
         run: dotnet build ./v2rayN/v2rayN/v2rayN.csproj -c Release --artifacts-path ./artifacts/wpf
 
-      - name: Upload test results
+      - name: Upload provenance and test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: subscription-split-results-${{ matrix.os }}
-          path: ./TestResults/**/*.trx
+          name: subscription-split-${{ matrix.target }}-${{ matrix.os }}
+          path: |
+            ./TestResults/**/*.trx
+            ./TestResults/provenance.txt
           if-no-files-found: error
