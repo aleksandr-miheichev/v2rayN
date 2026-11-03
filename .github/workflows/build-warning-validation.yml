@@ -1,0 +1,102 @@
+name: UI editor model validation - macOS Intel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26-intel]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_CLI_UI_LANGUAGE: en
+      V2RAYN_LOCAL_APPLICATION_DATA_V2: '0'
+      TUNIT_MAX_PARALLEL_TESTS: '1'
+    steps:
+      - name: Checkout validation revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          submodules: recursive
+      - name: Install stable SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.403'
+      - name: Record source and pin SDK selection
+        run: |
+          git log -2 --format='%H %T %s'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $changed = @(git diff --name-only HEAD^ HEAD)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $allowed = @(
+            '.github/workflows/build-warning-validation.yml',
+            '.ci/binding-probes/Program.cs',
+            '.ci/binding-probes/AvaloniaProbe.csproj',
+            '.ci/binding-probes/Directory.Build.props'
+          )
+          if ($changed.Count -ne $allowed.Count -or @($changed | Where-Object { $_ -notin $allowed }).Count -gt 0) {
+            throw 'Validation commit must add only the fork-only workflow and binding probe.'
+          }
+          $configuration = Get-Content -LiteralPath global.json -Raw | ConvertFrom-Json
+          if ($configuration.test.runner -ne 'Microsoft.Testing.Platform') {
+            throw 'Unexpected test-runner selection.'
+          }
+          $configuration | Add-Member -NotePropertyName sdk -NotePropertyValue ([ordered]@{
+            version = '10.0.403'
+            rollForward = 'disable'
+            allowPrerelease = $false
+          }) -Force
+          $configuration | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath global.json -Encoding utf8
+          $actualSdk = (dotnet --version).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($actualSdk -ne '10.0.403') { throw "Unexpected SDK: $actualSdk" }
+          dotnet --info
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff -- global.json
+      - name: Complete ServiceLib suite
+        run: |
+          dotnet test --project v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --report-trx --results-directory .ci-results/service
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Complete WebAPI suite
+        run: |
+          dotnet test --project v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --report-trx --results-directory .ci-results/webapi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Avalonia Release build and binding warning gate
+        run: |
+          dotnet build v2rayN/v2rayN.Desktop/v2rayN.Desktop.csproj -c Release -p:WarningsAsErrors=RXUIBIND010
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: WPF Release build and binding warning gate
+        if: runner.os == 'Windows'
+        run: |
+          dotnet build v2rayN/v2rayN/v2rayN.csproj -c Release -p:WarningsAsErrors=RXUIBIND010
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Real Avalonia headless bindings and negative control
+        run: |
+          dotnet build .ci/binding-probes/AvaloniaProbe.csproj -c Release "-p:V2rayNRoot=$env:GITHUB_WORKSPACE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $probe = Join-Path $env:GITHUB_WORKSPACE '.ci/binding-probes/bin/AvaloniaProbe/Release/net10.0/AvaloniaProbe.dll'
+          $positive = Join-Path $env:RUNNER_TEMP 'ui-bindings-positive'
+          dotnet $probe $positive $env:GITHUB_WORKSPACE
+          $positiveExit = $LASTEXITCODE
+          Get-Content -LiteralPath (Join-Path $positive 'probe.log')
+          if ($positiveExit -ne 0) { throw "Positive binding probe failed: $positiveExit" }
+          $negative = Join-Path $env:RUNNER_TEMP 'ui-bindings-negative'
+          dotnet $probe $negative $env:GITHUB_WORKSPACE --negative
+          $negativeExit = $LASTEXITCODE
+          $negativeLog = Get-Content -LiteralPath (Join-Path $negative 'probe.log') -Raw
+          Write-Output $negativeLog
+          if ($negativeExit -ne 42 -or $negativeLog -notmatch 'BINDING_ASSERTION_FAILURE AddServerWindow model-to-control') {
+            throw "Negative binding probe did not reach its expected rejection: $negativeExit"
+          }
+          exit 0
