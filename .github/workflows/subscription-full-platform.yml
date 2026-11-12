@@ -102,7 +102,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dotnet test --project v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --artifacts-path "$BUILD_DIRECTORY" --results-directory "$RESULTS_DIRECTORY/servicelib" --minimum-expected-tests 313 -- --report-trx 2>&1 | tee "$RESULTS_DIRECTORY/servicelib.log"
+          dotnet test --project v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --artifacts-path "$BUILD_DIRECTORY" --results-directory "$RESULTS_DIRECTORY/servicelib" --minimum-expected-tests 320 -- --report-trx 2>&1 | tee "$RESULTS_DIRECTORY/servicelib.log"
 
       - name: Test full WebAPI suite
         shell: bash
