@@ -1,0 +1,132 @@
+name: Unchanged subscription reload validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_sha:
+        description: Immutable feature commit SHA
+        required: true
+        type: string
+      code_tree:
+        description: Expected feature tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Full suites and desktop / ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-26-intel]
+    runs-on: ${{ matrix.os }}
+    env:
+      V2RAYN_LOCAL_APPLICATION_DATA_V2: '0'
+      TUNIT_MAX_PARALLEL_TESTS: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - name: Validate immutable source inputs
+        shell: bash
+        env:
+          CODE_SHA: ${{ inputs.code_sha }}
+          CODE_TREE: ${{ inputs.code_tree }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          TRIGGER_REF: ${{ github.ref }}
+          RUNNER_LABEL: ${{ matrix.os }}
+          ACTUAL_OS: ${{ runner.os }}
+          ACTUAL_ARCH: ${{ runner.arch }}
+        run: |
+          set -euo pipefail
+          RESULTS_DIRECTORY="$RUNNER_TEMP/subscription-noop-results"
+          BUILD_DIRECTORY="$RUNNER_TEMP/subscription-noop-build"
+          printf 'RESULTS_DIRECTORY=%s\nBUILD_DIRECTORY=%s\n' "$RESULTS_DIRECTORY" "$BUILD_DIRECTORY" >> "$GITHUB_ENV"
+          mkdir -p "$RESULTS_DIRECTORY"
+          {
+            printf 'workflow_sha=%s\n' "$WORKFLOW_SHA"
+            printf 'workflow_ref=%s\n' "$WORKFLOW_REF"
+            printf 'runner_label=%s\n' "$RUNNER_LABEL"
+            printf 'actual_os=%s\n' "$ACTUAL_OS"
+            printf 'actual_arch=%s\n' "$ACTUAL_ARCH"
+          } | tee "$RESULTS_DIRECTORY/provenance.txt"
+          [[ "$CODE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CODE_TREE" =~ ^[0-9a-f]{40}$ ]]
+          test "$TRIGGER_REF" = 'refs/heads/codex/validate-unchanged-subscription-restarts'
+          printf 'expected_code_sha=%s\nexpected_code_tree=%s\n' "$CODE_SHA" "$CODE_TREE" | tee -a "$RESULTS_DIRECTORY/provenance.txt"
+
+      - name: Checkout immutable feature source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.code_sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Verify checked-out source
+        shell: bash
+        env:
+          CODE_SHA: ${{ inputs.code_sha }}
+          CODE_TREE: ${{ inputs.code_tree }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          actual_status="$(git status --porcelain)"
+          printf 'actual_code_sha=%s\nactual_code_tree=%s\ninitial_status=%s\n' "$actual_sha" "$actual_tree" "$actual_status" | tee -a "$RESULTS_DIRECTORY/provenance.txt"
+          test "$actual_sha" = "$CODE_SHA"
+          test "$actual_tree" = "$CODE_TREE"
+          test -z "$actual_status"
+          printf 'source_verified=true\n' | tee -a "$RESULTS_DIRECTORY/provenance.txt"
+
+      - name: Setup pinned compiler SDK and target runtime
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            11.0.100
+            10.0.404
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sdk="$(dotnet --version)"
+          test "$actual_sdk" = '11.0.100'
+          printf 'actual_sdk=%s\n' "$actual_sdk" | tee -a "$RESULTS_DIRECTORY/provenance.txt"
+          dotnet --info >> "$RESULTS_DIRECTORY/provenance.txt"
+          dotnet --list-runtimes >> "$RESULTS_DIRECTORY/provenance.txt"
+
+      - name: Test full ServiceLib suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test --project v2rayN/ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --artifacts-path "$BUILD_DIRECTORY" --results-directory "$RESULTS_DIRECTORY/servicelib" --minimum-expected-tests 313 -- --report-trx 2>&1 | tee "$RESULTS_DIRECTORY/servicelib.log"
+
+      - name: Test full WebAPI suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test --project v2rayN/v2rayN.WebAPI/Tests/v2rayN.WebAPI.Tests.csproj -c Release --artifacts-path "$BUILD_DIRECTORY" --results-directory "$RESULTS_DIRECTORY/webapi" --minimum-expected-tests 404 -- --report-trx 2>&1 | tee "$RESULTS_DIRECTORY/webapi.log"
+
+      - name: Build Avalonia desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build v2rayN/v2rayN.Desktop/v2rayN.Desktop.csproj -c Release --artifacts-path "$BUILD_DIRECTORY" 2>&1 | tee "$RESULTS_DIRECTORY/avalonia-build.log"
+
+      - name: Build Windows WPF desktop
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build v2rayN/v2rayN/v2rayN.csproj -c Release --artifacts-path "$BUILD_DIRECTORY" 2>&1 | tee "$RESULTS_DIRECTORY/wpf-build.log"
+
+      - name: Upload provenance and executed results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: subscription-noop-${{ matrix.os }}
+          path: ${{ runner.temp }}/subscription-noop-results
+          if-no-files-found: error
