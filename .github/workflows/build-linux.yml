@@ -1,5 +1,5 @@
 name: Verify Linux packaging (PR 10598)
-run-name: Linux packages ${{ inputs.subject_sha || '511d970690b301dec6786c13cf16823b1fc63516' }}
+run-name: Linux packages ${{ inputs.subject_sha || 'b0a6e0937f0ff722a1bf02745e637e814ab7d8e2' }}
 
 on:
   workflow_dispatch:
@@ -7,13 +7,21 @@ on:
       subject_sha:
         description: Exact 40-character commit in aleksandr-miheichev/v2rayN
         required: true
-        default: 511d970690b301dec6786c13cf16823b1fc63516
+        default: b0a6e0937f0ff722a1bf02745e637e814ab7d8e2
         type: string
       include_current_sdk:
         description: Also verify current stable SDK 11.0.100 using the script's environment override
         required: true
         default: true
         type: boolean
+      rpm_runtime:
+        description: RPM install/runtime distro; the UBI10 build image remains unchanged
+        required: true
+        default: almalinux-10.2
+        type: choice
+        options:
+          - almalinux-10.2
+          - ubi10
   push:
     branches:
       - codex/verify-pr10598-linux-packaging-20261114
@@ -32,9 +40,10 @@ jobs:
         format: [deb, rpm]
         sdk: ${{ fromJSON((github.event_name == 'push' || inputs.include_current_sdk) && '["script-default","11.0.100"]' || '["script-default"]') }}
     env:
-      SUBJECT_SHA: ${{ inputs.subject_sha || '511d970690b301dec6786c13cf16823b1fc63516' }}
+      SUBJECT_SHA: ${{ inputs.subject_sha || 'b0a6e0937f0ff722a1bf02745e637e814ab7d8e2' }}
       PACKAGE_FORMAT: ${{ matrix.format }}
       SDK_MODE: ${{ matrix.sdk }}
+      RPM_RUNTIME: ${{ inputs.rpm_runtime || 'almalinux-10.2' }}
     defaults:
       run:
         shell: bash
@@ -91,6 +100,25 @@ jobs:
           fi
           docker image inspect "$image" > evidence/build-image.json
           printf 'BUILD_IMAGE=%s\n' "$(docker image inspect --format '{{.Id}}' "$image")" >> "$GITHUB_ENV"
+          install_image="$image"
+          install_target=debian-13
+          if [[ "$PACKAGE_FORMAT" == rpm ]]; then
+            case "$RPM_RUNTIME" in
+              ubi10) install_target=ubi10 ;;
+              almalinux-10.2)
+                # Official stable 10.2-20261027 linux/amd64 manifest, verified 2026-11-14.
+                install_image=docker.io/library/almalinux@sha256:be4feaca99462d71397c21275f3a8a000e5175aaa94bb9fb52adc4494662a442
+                install_target=almalinux-10.2
+                docker pull --platform linux/amd64 "$install_image"
+                ;;
+              *) printf 'Unsupported RPM runtime selection: %s\n' "$RPM_RUNTIME" >&2; exit 1 ;;
+            esac
+          fi
+          docker image inspect "$install_image" > evidence/install-base-image.json
+          printf 'INSTALL_IMAGE=%s\nINSTALL_TARGET=%s\n' \
+            "$(docker image inspect --format '{{.Id}}' "$install_image")" "$install_target" >> "$GITHUB_ENV"
+          printf 'build_image=%s\ninstall_target=%s\ninstall_image=%s\n' \
+            "$image" "$install_target" "$install_image" > evidence/image-selection.txt
 
       - name: Run the full production packaging CLI
         id: build
@@ -116,8 +144,8 @@ jobs:
           docker run --name "$TASK_PREFIX-install" \
             --mount "type=bind,src=$GITHUB_WORKSPACE/validation/.github/scripts,dst=/ci,readonly" \
             --mount "type=bind,src=$GITHUB_WORKSPACE/evidence,dst=/evidence" \
-            --env SUBJECT_SHA --env PACKAGE_FORMAT --env SDK_MODE \
-            "$BUILD_IMAGE" bash /ci/packaging-ci.sh install 2>&1 | tee evidence/install-container.log
+            --env SUBJECT_SHA --env PACKAGE_FORMAT --env SDK_MODE --env INSTALL_TARGET \
+            "$INSTALL_IMAGE" bash /ci/packaging-ci.sh install 2>&1 | tee evidence/install-container.log
           result=${PIPESTATUS[0]}
           set -e
           printf 'exit_code=%s\n' "$result" >> evidence/install-status.txt
@@ -173,9 +201,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          printf 'subject_sha=%s\nvalidation_sha=%s\nformat=%s\nsdk_mode=%s\nbuild=%s\ninstall=%s\nruntime=%s\n' \
+          printf 'subject_sha=%s\nvalidation_sha=%s\nformat=%s\nsdk_mode=%s\nbuild=%s\ninstall=%s\nruntime=%s\ninstall_target=%s\ninstall_image=%s\n' \
             "$SUBJECT_SHA" "$GITHUB_SHA" "$PACKAGE_FORMAT" "$SDK_MODE" \
-            "$BUILD_OUTCOME" "$INSTALL_OUTCOME" "$RUNTIME_OUTCOME" > evidence/stage-results.txt
+            "$BUILD_OUTCOME" "$INSTALL_OUTCOME" "$RUNTIME_OUTCOME" \
+            "${INSTALL_TARGET:-unresolved}" "${INSTALL_IMAGE:-unresolved}" > evidence/stage-results.txt
           if [[ -n "${TASK_PREFIX:-}" ]]; then
             for stage in build install display-prepare display smoke; do
               docker logs "$TASK_PREFIX-$stage" > "evidence/docker-$stage.log" 2>&1 || true
@@ -185,6 +214,7 @@ jobs:
           {
             printf 'Subject %s; validation %s; %s x64; SDK %s.\n\n' "$SUBJECT_SHA" "$GITHUB_SHA" "$PACKAGE_FORMAT" "$SDK_MODE"
             printf 'Build: **%s**; installation: **%s**; installed apphost/Xvfb: **%s**.\n\n' "$BUILD_OUTCOME" "$INSTALL_OUTCOME" "$RUNTIME_OUTCOME"
+            printf 'Install/runtime environment: **%s**. RPM build remains UBI10; an AlmaLinux result is a separate target and does not replace prior UBI installation failure evidence.\n\n' "${INSTALL_TARGET:-unresolved}"
             printf 'The script-default job is the existing SDK 10.0.114 pipeline reference. SDK 11.0.100 is a separate environment override. See evidence for actual selected SDK/runtime versions.\n\n'
             printf 'Linux containers on a hosted VM with a Mesa software-rendering request; physical Linux and hardware GPU: Not run. Manual full-window screenshot review remains required.\n'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -193,7 +223,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-packaging-${{ env.SUBJECT_SHA }}-${{ matrix.format }}-${{ matrix.sdk }}-${{ github.run_attempt }}
+          name: linux-packaging-${{ env.SUBJECT_SHA }}-${{ matrix.format }}-${{ matrix.sdk }}-${{ env.INSTALL_TARGET || 'unresolved' }}-${{ github.run_attempt }}
           path: evidence/
           if-no-files-found: error
           retention-days: 14

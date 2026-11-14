@@ -116,6 +116,7 @@ if [[ "$phase" == build ]]; then
   uname -a > /evidence/build-kernel.txt
   if [[ "$PACKAGE_FORMAT" == deb ]]; then
     export DEBIAN_FRONTEND=noninteractive
+    dpkg-query -W > /evidence/install-os-packages-before-package.txt
     apt-get update
     apt-get install --no-install-recommends -y sudo git curl ca-certificates python3 binutils \
       libc6 libgcc-s1 libstdc++6 zlib1g libicu-dev libssl-dev
@@ -159,7 +160,21 @@ elif [[ "$phase" == install ]]; then
     apt-get install --no-install-recommends -y python3 passwd file
     dpkg-query -W > /evidence/installed-os-packages.txt
   else
-    bootstrap_rpm
+    rpm -qa | sort > /evidence/install-os-packages-before-package.txt
+    # UBI10 is the build reference; a full public EL10 distro is a separate runtime target.
+    # shellcheck disable=SC1091
+    install_os=$(. /etc/os-release; printf '%s:%s' "$ID" "$VERSION_ID")
+    case "${INSTALL_TARGET:?}:$install_os" in
+      almalinux-10.2:almalinux:10.2) ;;
+      ubi10:rhel:10*) bootstrap_rpm ;;
+      *) printf 'Unexpected RPM installation environment: %s / %s\n' "$INSTALL_TARGET" "$install_os" >&2; exit 1 ;;
+    esac
+    dnf repolist -v > /evidence/install-enabled-repositories.txt 2>&1
+    set +e
+    dnf list --showduplicates --available xdg-utils > /evidence/install-xdg-utils-available.txt 2>&1
+    probe_result=$?
+    set -e
+    printf 'exit_code=%s\n' "$probe_result" >> /evidence/install-xdg-utils-available.txt
     dnf -y install "${packages[0]}"
     rpm -qa | sort > /evidence/installed-os-packages-before-smoke-tools.txt
     # Do not supplement ICU, X11 or fonts before the decisive runtime smoke.

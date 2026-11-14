@@ -95,7 +95,7 @@ def main():
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     pass
-                raise RuntimeError('X11 inspection unavailable in the package-resolved environment; '
+                raise RuntimeError(f'X11 inspection unavailable in the package-resolved environment: {error}; '
                                    f'apphost launch attempted, exit={process.poll()}; see app stderr') from error
             display = x11.open_display(None)
             if not display:

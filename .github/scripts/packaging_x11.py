@@ -32,7 +32,24 @@ def bind(name, args, result):
     return function
 
 
-x11 = c.CDLL(ctypes.util.find_library("X11"))
+def load_x11_library():
+    """Resolve the Linux X11 ABI explicitly; None would open Python itself."""
+    discovered = ctypes.util.find_library("X11")
+    candidates = list(dict.fromkeys(name for name in (discovered, "libX11.so.6") if name))
+    errors = []
+    for name in candidates:
+        try:
+            library = c.CDLL(name)
+            getattr(library, "XOpenDisplay")
+        except (OSError, AttributeError) as error:
+            errors.append(f"{name}: {error}")
+        else:
+            return library
+    raise RuntimeError("X11 inspector dependency unavailable: libX11.so.6 could not be loaded; "
+                       + "; ".join(errors))
+
+
+x11 = load_x11_library()
 open_display = bind("XOpenDisplay", [c.c_char_p], c.c_void_p)
 close_display = bind("XCloseDisplay", [c.c_void_p], c.c_int)
 root_window = bind("XDefaultRootWindow", [c.c_void_p], Window)
