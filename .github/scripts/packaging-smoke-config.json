@@ -1,0 +1,24 @@
+{
+  "IndexId": "",
+  "SubIndexId": "",
+  "SystemProxyItem": { "SysProxyType": 2 },
+  "TunModeItem": { "EnableTun": false },
+  "GuiItem": {
+    "AutoRun": false,
+    "AutoUpdateInterval": 0,
+    "EnableStatistics": false,
+    "DisplayRealTimeSpeed": false,
+    "RootCertProvider": "system"
+  },
+  "UiItem": {
+    "CurrentLanguage": "en",
+    "AutoHideStartup": false,
+    "Hide2TrayWhenClose": false
+  },
+  "CheckUpdateItem": {
+    "UpdateViaProxy": false,
+    "SelectedCoreTypes": [],
+    "CheckPreReleaseCoreTypes": []
+  },
+  "GlobalHotkeys": []
+}
