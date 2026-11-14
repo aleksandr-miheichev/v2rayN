@@ -116,7 +116,6 @@ if [[ "$phase" == build ]]; then
   uname -a > /evidence/build-kernel.txt
   if [[ "$PACKAGE_FORMAT" == deb ]]; then
     export DEBIAN_FRONTEND=noninteractive
-    dpkg-query -W > /evidence/install-os-packages-before-package.txt
     apt-get update
     apt-get install --no-install-recommends -y sudo git curl ca-certificates python3 binutils \
       libc6 libgcc-s1 libstdc++6 zlib1g libicu-dev libssl-dev
@@ -152,6 +151,7 @@ elif [[ "$phase" == install ]]; then
   test "${#packages[@]}" -eq 1
   if [[ "$PACKAGE_FORMAT" == deb ]]; then
     export DEBIAN_FRONTEND=noninteractive
+    dpkg-query -W > /evidence/install-os-packages-before-package.txt
     apt-get update
     # Install with the package resolver first; extraction is only a payload inventory.
     apt-get install --no-install-recommends -y "${packages[0]}"
@@ -178,7 +178,7 @@ elif [[ "$phase" == install ]]; then
     dnf -y install "${packages[0]}"
     rpm -qa | sort > /evidence/installed-os-packages-before-smoke-tools.txt
     # Do not supplement ICU, X11 or fonts before the decisive runtime smoke.
-    dnf -y install python3 shadow-utils file
+    dnf -y install python3 shadow-utils file diffutils
     rpm -qa | sort > /evidence/installed-os-packages.txt
   fi
   test -x /opt/v2rayN/v2rayN

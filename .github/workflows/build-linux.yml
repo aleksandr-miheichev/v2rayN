@@ -22,6 +22,15 @@ on:
         options:
           - almalinux-10.2
           - ubi10
+      package_format:
+        description: Package formats to verify
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - deb
+          - rpm
   push:
     branches:
       - codex/verify-pr10598-linux-packaging-20261114
@@ -37,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        format: [deb, rpm]
+        format: ${{ fromJSON(inputs.package_format == 'deb' && '["deb"]' || inputs.package_format == 'rpm' && '["rpm"]' || '["deb","rpm"]') }}
         sdk: ${{ fromJSON((github.event_name == 'push' || inputs.include_current_sdk) && '["script-default","11.0.100"]' || '["script-default"]') }}
     env:
       SUBJECT_SHA: ${{ inputs.subject_sha || 'b0a6e0937f0ff722a1bf02745e637e814ab7d8e2' }}

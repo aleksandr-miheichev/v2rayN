@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Detect the previously missing group toolbar and DataGrid header bands."""
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import struct
@@ -40,12 +41,18 @@ def read_rgb_png(path):
 def band_statistics(rows, screen_width, screen_height, x, y, width, height):
     if x < 0 or y < 0 or x + width > screen_width or y + height > screen_height:
         raise ValueError('The complete target band is outside the screenshot')
-    nonwhite = 0
+    colors = Counter()
     for row in rows[y:y + height]:
         values = row[x * 3:(x + width) * 3]
-        nonwhite += sum(min(values[index:index + 3]) < 245 for index in range(0, len(values), 3))
+        colors.update(tuple(values[index:index + 3]) for index in range(0, len(values), 3))
+    background = colors.most_common(1)[0][0]
+    nonwhite = sum(count for color, count in colors.items() if min(color) < 245)
+    contrast = sum(count for color, count in colors.items()
+                   if max(abs(value - base) for value, base in zip(color, background)) >= 32)
     return {'root_rect': [x, y, width, height], 'pixel_count': width * height,
-            'nonwhite_pixels': nonwhite, 'nonwhite_fraction': nonwhite / (width * height)}
+            'nonwhite_pixels': nonwhite, 'nonwhite_fraction': nonwhite / (width * height),
+            'dominant_rgb': background, 'contrast_pixels': contrast,
+            'contrast_fraction': contrast / (width * height)}
 
 
 def assess(path, geometry):
@@ -56,9 +63,26 @@ def assess(path, geometry):
     threshold = max(500, window_width // 2)
     return {'screenshot': str(Path(path)), 'window_geometry': geometry,
         'toolbar_band': toolbar, 'header_band': header, 'threshold_nonwhite_pixels': threshold,
+        'threshold_contrast_pixels': threshold, 'minimum_channel_contrast': 32,
         'toolbar_and_headers_present': toolbar['nonwhite_pixels'] >= threshold
-            and header['nonwhite_pixels'] >= threshold,
-        'scope': 'Measures the known missing toolbar/header bands. Exit-dialog pixels are outside both bands; manual full-window review remains required.'}
+            and header['nonwhite_pixels'] >= threshold
+            and toolbar['contrast_pixels'] >= threshold and header['contrast_pixels'] >= threshold,
+        'scope': 'Band count/contrast guard only; uniform white, black and gray are rejected. Manual full-window review remains required.'}
+
+
+def settled_readiness(frames):
+    """Require two consecutive valid samples spanning at least two seconds."""
+    since = None
+    count = 0
+    for frame in frames:
+        if frame['readiness']['toolbar_and_headers_present']:
+            if since is None:
+                since = frame['elapsed_seconds']
+            count += 1
+        else:
+            since = None
+            count = 0
+    return count >= 2 and frames[-1]['elapsed_seconds'] - since >= 2.0
 
 
 def main():

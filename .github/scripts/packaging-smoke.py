@@ -5,6 +5,7 @@ import json
 import os
 from contextlib import closing
 from pathlib import Path
+import shutil
 import subprocess
 import time
 
@@ -78,6 +79,7 @@ def main():
               'mesa_environment_request': {'LIBGL_ALWAYS_SOFTWARE': '1'},
               'stages': [], 'passive_startup_ready': False, 'eventual_ready': False,
               'first_ready_stage': None, 'manual_full_window_review': 'Required',
+              'readiness_rule': 'Two consecutive valid count/contrast samples separated by at least 2 seconds; passive startup assessed separately from input diagnostics',
               'physical_linux_and_hardware_gpu': 'Not run: hosted VM and containers; software Mesa requested'}
     process = None
     display = None
@@ -119,6 +121,7 @@ def main():
 
             for kind in ('initial', 'focus', 'pointer', 'resize'):
                 stage = {'kind': kind, 'frames': []}
+                result['stages'].append(stage)
                 if kind != 'initial':
                     stage['stimulus'] = x11.apply_stimulus(display, window, process.pid, kind)
                 start = time.monotonic()
@@ -129,16 +132,20 @@ def main():
                         raise RuntimeError(f'Apphost exited during {kind}: {process.returncode}')
                     state = x11.input_state(display, window, process.pid)
                     image = output / f'{kind}-{frame_index:02d}-full-screen.png'
+                    captured_at = time.monotonic() - start
                     x11.capture(display, x11.root_window(display), image)
                     assessment = detector.assess(image, state['geometry'])
-                    stage['frames'].append({'elapsed_seconds': time.monotonic() - start,
+                    stage['frames'].append({'elapsed_seconds': captured_at,
+                                            'assessment_completed_seconds': time.monotonic() - start,
                                             'input_state': state, 'readiness': assessment})
-                    if assessment['toolbar_and_headers_present']:
+                    stage['settled_ready'] = detector.settled_readiness(stage['frames'])
+                    if stage['settled_ready']:
                         result['eventual_ready'] = True
                         result['first_ready_stage'] = kind
                         result['passive_startup_ready'] = kind == 'initial'
+                    write_json(output / 'runtime.json', result)
+                    if stage['settled_ready']:
                         break
-                result['stages'].append(stage)
                 write_json(output / 'runtime.json', result)
                 if result['eventual_ready']:
                     break
@@ -188,6 +195,16 @@ def main():
                 process.wait(timeout=5)
                 result['stop_method'] += '; bounded SIGKILL fallback'
         result['final_exit_code'] = process.returncode if process else None
+        app_logs = directories['XDG_DATA_HOME'] / 'v2rayN/guiLogs'
+        result['app_log_collection'] = {'source': str(app_logs), 'copied': False}
+        try:
+            if app_logs.is_dir():
+                shutil.copytree(app_logs, output / 'guiLogs', dirs_exist_ok=True)
+                result['app_log_collection'].update(copied=True, file_count=sum(path.is_file() for path in (output / 'guiLogs').rglob('*')))
+            else:
+                result['app_log_collection']['reason'] = 'The fresh application did not create this directory'
+        except OSError as error:
+            result['app_log_collection']['error'] = str(error)
         write_json(output / 'runtime.json', result)
         if display:
             x11.close_display(display)
