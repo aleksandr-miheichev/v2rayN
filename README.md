@@ -1,9 +1,9 @@
-# PR 10598 installed-package screenshots
+# PR10598 installed-package evidence
 
-These complete frames show actual installed v2rayN apphosts from source commit b0a6e0937f0ff722a1bf02745e637e814ab7d8e2. The production DEB/RPM builders, fresh package resolver installation, native file hashes, SQLite integrity and settled passive UI were checked in run https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43558791305.
+Source: `cd1161b116f9d9e0704dbcbfb1df665eb4f9199e`. [Build/install/runtime CI](https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43590793248).
 
-DEB build/runtime used Debian 13. RPM build used UBI 10 and installation/runtime used AlmaLinux 10.2. Images show a private Xvfb display in disposable Linux containers on GitHub-hosted VMs; physical Linux and hardware GPU are not established.
+Four independently captured installed-apphost screenshots cover DEB on Debian13 and RPM on AlmaLinux10.2 (RPM build in UBI10), with script-default SDK10.0.114 and SDK11.0.100. Their app runtime packs are10.0.14 and10.0.15 respectively. Captures within each format are byte-identical because the displayed empty-profile UI is the same; identity is retained per job/artifact in screenshots.json.
 
-Profiles were intentionally empty, TUN off and system-proxy mode unchanged. The visible invalid-configuration notice is the expected empty-profile state, not a native-library startup failure. No personal server, profile or credential data is shown.
+Private software-rendered Xvfb displays, empty profiles, TUN disabled and system-proxy mode unchanged. The invalid-configuration notice is expected without a server profile. No proxy/TUN traffic or graceful exit is claimed. These hosted-VM/container captures do not establish physical Linux or hardware GPU operation.
 
-Default-script SDK 10.0.114 selected self-contained runtime pack 10.0.14; the current SDK 11.0.100 override selected runtime pack 10.0.15. The screenshots are observational evidence and do not establish graceful application exit or proxy/TUN traffic.
+Native payload/loaded hashes, SQLite integrity and two settled passive frames were checked. Existing DEBUG Interaction messages remain in raw CI logs. Publishing these files does not add them to the upstream product branch.

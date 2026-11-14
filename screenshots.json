@@ -2,41 +2,37 @@
   {
     "file": "debian-sdk10.png",
     "sha256": "8ca87672d17ce3c5e8a11f51abbb45a67bb100ffff74b43131ac5577208f15ed",
-    "runtimeOS": "Debian13",
-    "sdk": "10.0.114",
-    "runtimePack": "10.0.14",
-    "sourceCommit": "b0a6e0937f0ff722a1bf02745e637e814ab7d8e2",
-    "validationCommit": "be0e5f6e1a48f4339b1016712123de386ec7005f",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43558791305"
+    "source": "cd1161b116f9d9e0704dbcbfb1df665eb4f9199e",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43590793248",
+    "job_id": 132434858957,
+    "artifact_id": 14111429392,
+    "original_entry": "runtime/initial-02-full-screen.png"
   },
   {
     "file": "debian-sdk11.png",
-    "sha256": "639a74e84665872f65c003a935f79d0659e78e9c82109617fb5758a4132cc5bd",
-    "runtimeOS": "Debian13",
-    "sdk": "11.0.100",
-    "runtimePack": "10.0.15",
-    "sourceCommit": "b0a6e0937f0ff722a1bf02745e637e814ab7d8e2",
-    "validationCommit": "be0e5f6e1a48f4339b1016712123de386ec7005f",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43558791305"
+    "sha256": "8ca87672d17ce3c5e8a11f51abbb45a67bb100ffff74b43131ac5577208f15ed",
+    "source": "cd1161b116f9d9e0704dbcbfb1df665eb4f9199e",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43590793248",
+    "job_id": 132434859238,
+    "artifact_id": 14111164928,
+    "original_entry": "runtime/initial-02-full-screen.png"
   },
   {
     "file": "almalinux-sdk10.png",
     "sha256": "982611910b044591d7ffbb07410d793aca61c4c59d99132b7d00d4ba3f5a8b9b",
-    "runtimeOS": "AlmaLinux10.2",
-    "sdk": "10.0.114",
-    "runtimePack": "10.0.14",
-    "sourceCommit": "b0a6e0937f0ff722a1bf02745e637e814ab7d8e2",
-    "validationCommit": "be0e5f6e1a48f4339b1016712123de386ec7005f",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43558791305"
+    "source": "cd1161b116f9d9e0704dbcbfb1df665eb4f9199e",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43590793248",
+    "job_id": 132434859164,
+    "artifact_id": 14112800261,
+    "original_entry": "runtime/initial-02-full-screen.png"
   },
   {
     "file": "almalinux-sdk11.png",
-    "sha256": "6154bb82bec7125160278c68e00aee09c7b86f3bc2f2a1fe70b407fb472d1399",
-    "runtimeOS": "AlmaLinux10.2",
-    "sdk": "11.0.100",
-    "runtimePack": "10.0.15",
-    "sourceCommit": "b0a6e0937f0ff722a1bf02745e637e814ab7d8e2",
-    "validationCommit": "be0e5f6e1a48f4339b1016712123de386ec7005f",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43558791305"
+    "sha256": "982611910b044591d7ffbb07410d793aca61c4c59d99132b7d00d4ba3f5a8b9b",
+    "source": "cd1161b116f9d9e0704dbcbfb1df665eb4f9199e",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43590793248",
+    "job_id": 132434859165,
+    "artifact_id": 14111868953,
+    "original_entry": "runtime/initial-02-full-screen.png"
   }
 ]
