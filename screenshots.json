@@ -2,37 +2,37 @@
   {
     "file": "debian-sdk10.png",
     "sha256": "639a74e84665872f65c003a935f79d0659e78e9c82109617fb5758a4132cc5bd",
-    "source": "888af805f799b0cbdea8b0e27d116d79fa41e4a6",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43728380386",
-    "job_id": 132855199695,
-    "artifact_id": 14167621395,
+    "source": "3e5a81ce7bf8159519c4273683e13f1fbc018255",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43918887726",
+    "job_id": 133480485812,
+    "artifact_id": 14254045643,
     "entry": "runtime/initial-02-full-screen.png"
   },
   {
     "file": "debian-sdk11.png",
-    "sha256": "639a74e84665872f65c003a935f79d0659e78e9c82109617fb5758a4132cc5bd",
-    "source": "888af805f799b0cbdea8b0e27d116d79fa41e4a6",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43728380386",
-    "job_id": 132855199504,
-    "artifact_id": 14167751010,
+    "sha256": "8ca87672d17ce3c5e8a11f51abbb45a67bb100ffff74b43131ac5577208f15ed",
+    "source": "3e5a81ce7bf8159519c4273683e13f1fbc018255",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43918887726",
+    "job_id": 133480483792,
+    "artifact_id": 14253990744,
     "entry": "runtime/initial-02-full-screen.png"
   },
   {
     "file": "almalinux-sdk10.png",
     "sha256": "982611910b044591d7ffbb07410d793aca61c4c59d99132b7d00d4ba3f5a8b9b",
-    "source": "888af805f799b0cbdea8b0e27d116d79fa41e4a6",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43728380386",
-    "job_id": 132855199761,
-    "artifact_id": 14167711228,
+    "source": "3e5a81ce7bf8159519c4273683e13f1fbc018255",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43918887726",
+    "job_id": 133480483701,
+    "artifact_id": 14254745488,
     "entry": "runtime/initial-02-full-screen.png"
   },
   {
     "file": "almalinux-sdk11.png",
-    "sha256": "6154bb82bec7125160278c68e00aee09c7b86f3bc2f2a1fe70b407fb472d1399",
-    "source": "888af805f799b0cbdea8b0e27d116d79fa41e4a6",
-    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43728380386",
-    "job_id": 132855199630,
-    "artifact_id": 14167239453,
+    "sha256": "982611910b044591d7ffbb07410d793aca61c4c59d99132b7d00d4ba3f5a8b9b",
+    "source": "3e5a81ce7bf8159519c4273683e13f1fbc018255",
+    "run": "https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43918887726",
+    "job_id": 133480483920,
+    "artifact_id": 14253226094,
     "entry": "runtime/initial-02-full-screen.png"
   }
 ]

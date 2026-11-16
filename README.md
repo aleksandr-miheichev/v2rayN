@@ -1,6 +1,6 @@
 # PR10598 installed-package evidence
 
-Source: `888af805f799b0cbdea8b0e27d116d79fa41e4a6`. [Fresh packaging CI](https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43728380386).
+Source: `3e5a81ce7bf8159519c4273683e13f1fbc018255`. [Fresh packaging CI](https://github.com/aleksandr-miheichev/v2rayN/actions/runs/43918887726).
 
 Four independent installed-apphost captures cover DEB on Debian 13 and RPM on AlmaLinux 10.2 (RPM build in UBI 10), with script-default SDK 10.0.114/runtime pack 10.0.14 and SDK 11.0.100/runtime pack 10.0.15. Provenance and exact image hashes are in screenshots.json; identical image bytes do not merge the separate job identities.
 
